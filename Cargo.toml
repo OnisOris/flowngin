@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+ctrlc = "3.5.2"
 kiss3d = "0.45.0"
 rapier3d = "0.35.2"
 rapier_testbed3d = "0.35.2"
