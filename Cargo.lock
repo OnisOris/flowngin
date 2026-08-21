@@ -1306,6 +1306,7 @@ version = "0.1.0"
 dependencies = [
  "ctrlc",
  "kiss3d",
+ "nalgebra",
  "rapier3d",
  "rapier_testbed3d",
 ]
