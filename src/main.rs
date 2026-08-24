@@ -39,7 +39,7 @@ struct Simulation {
 #[kiss3d::main]
 // Главная асинхронная функция — с неё начинается выполнение программы.
 pub async fn main() {
-    let controller = controller::PidController::new(1.2);
+    let mut controller = controller::PidController::from_scalar(1., 1., 1.);
     // Этот флаг сообщает графическому циклу, что пользователь нажал Ctrl+C.
     let shutdown_requested = Arc::new(AtomicBool::new(false));
     // Передаём обработчику отдельную ссылку на тот же атомарный флаг.
@@ -60,6 +60,8 @@ pub async fn main() {
         viewer.clear_scene();
         // Создаём новый мир с землёй, одним шаром и целевой меткой.
         let mut simulation = create_simulation();
+        // Restart должен также очищать накопленное состояние PID-регулятора.
+        controller.reset();
 
         // Регистрируем все тела и коллайдеры мира в визуализаторе.
         viewer.set_world(&mut simulation.world);
@@ -94,7 +96,7 @@ pub async fn main() {
             // Учитываем кнопки Play, Pause и Step в интерфейсе Testbed.
             if viewer.simulating() {
                 // Пересчитываем управляющую силу по текущему положению шара.
-                apply_p_controller(&mut simulation, &controller);
+                apply_p_controller(&mut simulation, &mut controller);
                 // Продвигаем физический мир на один фиксированный временной шаг.
                 simulation.world.step();
             }
@@ -163,20 +165,21 @@ fn create_simulation() -> Simulation {
 }
 
 // Вычисляем и прикладываем горизонтальную силу P-регулятора.
-fn apply_p_controller(simulation: &mut Simulation, comtroller: &controller::PidController) {
+fn apply_p_controller(simulation: &mut Simulation, controller: &mut controller::PidController) {
     // Копируем значения до изменяемого заимствования физического тела.
     let ball_handle = simulation.ball_handle;
     // Копируем целевую точку, чтобы использовать её в расчёте ошибки.
-    let target = simulation.target;
+    let mut setpoint = simulation.target;
+    // PID вызывается один раз на физический шаг, поэтому берём dt из Rapier.
+    let dt = simulation.world.integration_parameters.dt;
     // Получаем изменяемую ссылку на единственный динамический шар.
     let ball = &mut simulation.world.bodies[ball_handle];
-
-    // Вычисляем вектор ошибки от текущего положения шара к цели.
-    let mut position_error = target - ball.translation();
-    // Убираем вертикальную составляющую: высотой управляет гравитация и контакт с землёй.
-    position_error.y = 0.0;
-    // P-регулятор преобразует ошибку положения в желаемую силу.
-    let requested_force = comtroller.compute(position_error);
+    let mut measurement = ball.translation();
+    // Высотой управляют гравитация и контакт с землёй.
+    measurement.y = 0.0;
+    setpoint.y = 0.0;
+    // PID работает с тем же Vector<f32>, что и Rapier.
+    let requested_force = controller.update(setpoint, measurement, dt);
     // Ограничиваем модуль силы для предсказуемого движения и сохранения сцепления с землёй.
     let controller_force = clamp_magnitude(requested_force, MAX_FORCE);
 
@@ -228,13 +231,14 @@ mod tests {
     fn controller_moves_ball_towards_target() {
         // Создаём отдельную физическую сцену без открытия графического окна.
         let mut simulation = create_simulation();
+        let mut controller = controller::PidController::from_scalar(1.0, 1.0, 1.0);
         // Запоминаем начальное расстояние до целевой точки.
         let initial_distance = distance_to_target(&simulation);
 
         // Выполняем десять секунд физического времени при стандартных 60 шагах в секунду.
         for _ in 0..600 {
             // Перед каждым шагом пересчитываем управляющую силу.
-            apply_p_controller(&mut simulation);
+            apply_p_controller(&mut simulation, &mut controller);
             // Продвигаем физический мир на один шаг.
             simulation.world.step();
         }
