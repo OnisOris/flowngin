@@ -4,14 +4,15 @@ use kiss3d::color::Color;
 use rapier3d::prelude::*;
 // Импортируем описание демо и нативное окно визуализации Rapier Testbed.
 use rapier_testbed3d::{ExampleEntry, TestbedViewer};
-
-mod controller;
-
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
-
+mod agent;
+mod controller;
+// use crate::agent;
+// use crate::controller::PidController;
+//
 // Половина высоты земли: её верхняя поверхность находится на Y = 0.1.
 const GROUND_HALF_HEIGHT: f32 = 0.1;
 // Радиус единственного динамического шара.
@@ -39,7 +40,16 @@ struct Simulation {
 #[kiss3d::main]
 // Главная асинхронная функция — с неё начинается выполнение программы.
 pub async fn main() {
-    let mut controller = controller::PidController::from_scalar(1., 1., 1.);
+    let agent = agent::Agent::
+    // На 30 уже флексит
+    let coef: f32 = 30.0;
+    let range: f32 = 9999999999999.;
+    let mut controller = controller::PidController::from_scalar(coef, coef, 4.0 * coef);
+    controller.set_outputs_limits(
+        Vec3::new(-range, -range, -range),
+        Vec3::new(range, range, range),
+    );
+    controller.set_outputs_limits_norm(range);
     // Этот флаг сообщает графическому циклу, что пользователь нажал Ctrl+C.
     let shutdown_requested = Arc::new(AtomicBool::new(false));
     // Передаём обработчику отдельную ссылку на тот же атомарный флаг.
@@ -181,12 +191,12 @@ fn apply_p_controller(simulation: &mut Simulation, controller: &mut controller::
     // PID работает с тем же Vector<f32>, что и Rapier.
     let requested_force = controller.update(setpoint, measurement, dt);
     // Ограничиваем модуль силы для предсказуемого движения и сохранения сцепления с землёй.
-    let controller_force = clamp_magnitude(requested_force, MAX_FORCE);
+    // let controller_force = clamp_magnitude(requested_force, MAX_FORCE);
 
     // Удаляем силу, рассчитанную на предыдущем шаге; гравитацию это не отключает.
     ball.reset_forces(false);
     // Прикладываем новое воздействие и будим шар, если Rapier успел его усыпить.
-    ball.add_force(controller_force, true);
+    ball.add_force(requested_force, true);
 }
 
 // Ограничиваем длину вектора заданным максимальным значением.
@@ -231,7 +241,13 @@ mod tests {
     fn controller_moves_ball_towards_target() {
         // Создаём отдельную физическую сцену без открытия графического окна.
         let mut simulation = create_simulation();
-        let mut controller = controller::PidController::from_scalar(1.0, 1.0, 1.0);
+        let mut controller = controller::PidController::from_scalar(5000.0, 4000000.0, 4.0);
+        let limit = 9999999999.;
+        let limit_vector: [f32; 3] = [limit, limit, limit];
+        let limit_vector = Vec3::from_array(limit_vector);
+        // let limit_vector = Vec3()
+        controller.set_outputs_limits_norm(limit);
+        controller.set_outputs_limits(limit_vector, limit_vector);
         // Запоминаем начальное расстояние до целевой точки.
         let initial_distance = distance_to_target(&simulation);
 
