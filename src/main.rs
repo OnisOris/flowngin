@@ -40,7 +40,7 @@ struct Simulation {
 #[kiss3d::main]
 // Главная асинхронная функция — с неё начинается выполнение программы.
 pub async fn main() {
-    let agent = agent::Agent::
+    let agent = agent::Agent::default();
     // На 30 уже флексит
     let coef: f32 = 30.0;
     let range: f32 = 9999999999999.;
