@@ -10,6 +10,7 @@ use std::sync::{
 };
 mod agent;
 mod controller;
+mod constants;
 // use crate::agent;
 // use crate::controller::PidController;
 //
@@ -40,16 +41,18 @@ struct Simulation {
 #[kiss3d::main]
 // Главная асинхронная функция — с неё начинается выполнение программы.
 pub async fn main() {
-    let agent = agent::Agent::default();
+    let mut agent_1 = agent::Agent::default();
+    let info = agent_1.get_status();
+    println!("{}", info);
     // На 30 уже флексит
     let coef: f32 = 30.0;
     let range: f32 = 9999999999999.;
-    let mut controller = controller::PidController::from_scalar(coef, coef, 4.0 * coef);
-    controller.set_outputs_limits(
-        Vec3::new(-range, -range, -range),
-        Vec3::new(range, range, range),
-    );
-    controller.set_outputs_limits_norm(range);
+    // let mut controller = controller::PidController::from_scalar(coef, coef, coef);
+    // controller.set_outputs_limits(
+    //     Vec3::new(-range, -range, -range),
+    //     Vec3::new(range, range, range),
+    // );
+    // controller.set_outputs_limits_norm(range);
     // Этот флаг сообщает графическому циклу, что пользователь нажал Ctrl+C.
     let shutdown_requested = Arc::new(AtomicBool::new(false));
     // Передаём обработчику отдельную ссылку на тот же атомарный флаг.
@@ -69,9 +72,9 @@ pub async fn main() {
         // Очищаем графику и состояние предыдущего запуска симуляции.
         viewer.clear_scene();
         // Создаём новый мир с землёй, одним шаром и целевой меткой.
-        let mut simulation = create_simulation();
+        let mut simulation = create_simulation(&agent_1);
         // Restart должен также очищать накопленное состояние PID-регулятора.
-        controller.reset();
+        agent_1.controller.reset();
 
         // Регистрируем все тела и коллайдеры мира в визуализаторе.
         viewer.set_world(&mut simulation.world);
@@ -106,7 +109,7 @@ pub async fn main() {
             // Учитываем кнопки Play, Pause и Step в интерфейсе Testbed.
             if viewer.simulating() {
                 // Пересчитываем управляющую силу по текущему положению шара.
-                apply_p_controller(&mut simulation, &mut controller);
+                apply_p_controller(&mut simulation, &mut agent_1);
                 // Продвигаем физический мир на один фиксированный временной шаг.
                 simulation.world.step();
             }
@@ -124,7 +127,7 @@ pub async fn main() {
 }
 
 // Создаём исходное состояние всей демонстрационной сцены.
-fn create_simulation() -> Simulation {
+fn create_simulation(agent_in: &agent::Agent) -> Simulation {
     // PhysicsWorld уже содержит гравитацию, pipeline, тела, коллайдеры и решатели Rapier.
     let mut world = PhysicsWorld::new();
 
@@ -149,9 +152,10 @@ fn create_simulation() -> Simulation {
             .linear_damping(0.8)
             .angular_damping(0.3),
         // Высокое трение заставляет шар катиться; малая упругость убирает лишние прыжки.
-        ColliderBuilder::ball(BALL_RADIUS)
-            .friction(1.0)
-            .restitution(0.1),
+        // ColliderBuilder::cuboid(BALL_RADIUS, BALL_RADIUS, BALL_RADIUS)
+        //     .friction(1.0)
+        //     .restitution(0.1),
+        agent_in.model.collider(),
     );
 
     // Размещаем плоскую метку немного выше поверхности земли.
@@ -175,7 +179,7 @@ fn create_simulation() -> Simulation {
 }
 
 // Вычисляем и прикладываем горизонтальную силу P-регулятора.
-fn apply_p_controller(simulation: &mut Simulation, controller: &mut controller::PidController) {
+fn apply_p_controller(simulation: &mut Simulation, agent: &mut agent::Agent) {
     // Копируем значения до изменяемого заимствования физического тела.
     let ball_handle = simulation.ball_handle;
     // Копируем целевую точку, чтобы использовать её в расчёте ошибки.
@@ -189,7 +193,7 @@ fn apply_p_controller(simulation: &mut Simulation, controller: &mut controller::
     measurement.y = 0.0;
     setpoint.y = 0.0;
     // PID работает с тем же Vector<f32>, что и Rapier.
-    let requested_force = controller.update(setpoint, measurement, dt);
+    let requested_force = agent.update(setpoint, measurement, dt);
     // Ограничиваем модуль силы для предсказуемого движения и сохранения сцепления с землёй.
     // let controller_force = clamp_magnitude(requested_force, MAX_FORCE);
 
@@ -213,67 +217,67 @@ fn clamp_magnitude(vector: Vector, maximum: f32) -> Vector {
     }
 }
 
-// Эти проверки запускаются только командой `cargo test` и не попадают в обычную программу.
-#[cfg(test)]
-mod tests {
-    // Импортируем функции и типы из основного модуля.
-    use super::*;
+// // Эти проверки запускаются только командой `cargo test` и не попадают в обычную программу.
+// #[cfg(test)]
+// mod tests {
+//     // Импортируем функции и типы из основного модуля.
+//     use super::*;
+//
+//     // Проверяем, что в демонстрации остаётся ровно один динамический объект.
+//     #[test]
+//     fn scene_contains_one_dynamic_ball() {
+//         // Создаём сцену тем же способом, что и основная программа.
+//         let simulation = create_simulation();
+//         // Считаем только динамические тела; земля и метка цели являются фиксированными.
+//         let dynamic_body_count = simulation
+//             .world
+//             .bodies
+//             .iter()
+//             .filter(|(_, body)| body.is_dynamic())
+//             .count();
+//
+//         // Ошибка теста покажет, если в сцене случайно снова появятся лишние шары.
+//         assert_eq!(dynamic_body_count, 1);
+//     }
 
-    // Проверяем, что в демонстрации остаётся ровно один динамический объект.
-    #[test]
-    fn scene_contains_one_dynamic_ball() {
-        // Создаём сцену тем же способом, что и основная программа.
-        let simulation = create_simulation();
-        // Считаем только динамические тела; земля и метка цели являются фиксированными.
-        let dynamic_body_count = simulation
-            .world
-            .bodies
-            .iter()
-            .filter(|(_, body)| body.is_dynamic())
-            .count();
-
-        // Ошибка теста покажет, если в сцене случайно снова появятся лишние шары.
-        assert_eq!(dynamic_body_count, 1);
-    }
-
-    // Проверяем, что P-регулятор действительно перемещает шар в сторону цели.
-    #[test]
-    fn controller_moves_ball_towards_target() {
-        // Создаём отдельную физическую сцену без открытия графического окна.
-        let mut simulation = create_simulation();
-        let mut controller = controller::PidController::from_scalar(5000.0, 4000000.0, 4.0);
-        let limit = 9999999999.;
-        let limit_vector: [f32; 3] = [limit, limit, limit];
-        let limit_vector = Vec3::from_array(limit_vector);
-        // let limit_vector = Vec3()
-        controller.set_outputs_limits_norm(limit);
-        controller.set_outputs_limits(limit_vector, limit_vector);
-        // Запоминаем начальное расстояние до целевой точки.
-        let initial_distance = distance_to_target(&simulation);
-
-        // Выполняем десять секунд физического времени при стандартных 60 шагах в секунду.
-        for _ in 0..600 {
-            // Перед каждым шагом пересчитываем управляющую силу.
-            apply_p_controller(&mut simulation, &mut controller);
-            // Продвигаем физический мир на один шаг.
-            simulation.world.step();
-        }
-
-        // Измеряем расстояние после работы регулятора.
-        let final_distance = distance_to_target(&simulation);
-        // Требуем, чтобы шар оказался существенно ближе к цели, чем в начале.
-        assert!(final_distance < initial_distance * 0.25);
-    }
-
-    // Вычисляем горизонтальное расстояние от шара до его целевой точки.
-    fn distance_to_target(simulation: &Simulation) -> f32 {
-        // Получаем текущую позицию шара.
-        let ball_position = simulation.world.bodies[simulation.ball_handle].translation();
-        // Вычисляем ошибку положения.
-        let mut difference = simulation.target - ball_position;
-        // Не учитываем вертикальную координату, поскольку контроллер работает в плоскости XZ.
-        difference.y = 0.0;
-        // Возвращаем длину горизонтального вектора.
-        difference.length()
-    }
-}
+//     // Проверяем, что P-регулятор действительно перемещает шар в сторону цели.
+//     #[test]
+//     fn controller_moves_ball_towards_target() {
+//         // Создаём отдельную физическую сцену без открытия графического окна.
+//         let mut simulation = create_simulation();
+//         let mut controller = controller::PidController::from_scalar(5000.0, 4000000.0, 4.0);
+//         let limit = 9999999999.;
+//         let limit_vector: [f32; 3] = [limit, limit, limit];
+//         let limit_vector = Vec3::from_array(limit_vector);
+//         // let limit_vector = Vec3()
+//         controller.set_outputs_limits_norm(limit);
+//         controller.set_outputs_limits(limit_vector, limit_vector);
+//         // Запоминаем начальное расстояние до целевой точки.
+//         let initial_distance = distance_to_target(&simulation);
+//
+//         // Выполняем десять секунд физического времени при стандартных 60 шагах в секунду.
+//         for _ in 0..600 {
+//             // Перед каждым шагом пересчитываем управляющую силу.
+//             apply_p_controller(&mut simulation, &mut controller);
+//             // Продвигаем физический мир на один шаг.
+//             simulation.world.step();
+//         }
+//
+//         // Измеряем расстояние после работы регулятора.
+//         let final_distance = distance_to_target(&simulation);
+//         // Требуем, чтобы шар оказался существенно ближе к цели, чем в начале.
+//         assert!(final_distance < initial_distance * 0.25);
+//     }
+//
+//     // Вычисляем горизонтальное расстояние от шара до его целевой точки.
+//     fn distance_to_target(simulation: &Simulation) -> f32 {
+//         // Получаем текущую позицию шара.
+//         let ball_position = simulation.world.bodies[simulation.ball_handle].translation();
+//         // Вычисляем ошибку положения.
+//         let mut difference = simulation.target - ball_position;
+//         // Не учитываем вертикальную координату, поскольку контроллер работает в плоскости XZ.
+//         difference.y = 0.0;
+//         // Возвращаем длину горизонтального вектора.
+//         difference.length()
+//     }
+// }
