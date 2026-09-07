@@ -1,6 +1,6 @@
 use crate::constants::Accuracy;
 use crate::controller::boid_controller::BoidsController;
-use crate::controller::pid_controller::PidController;
+use crate::controller::{motion_controller::MotionController, pid_controller::PidController};
 use rapier3d::geometry::Ball;
 use rapier3d::{
     math::{Vector, Vector3},
@@ -9,19 +9,31 @@ use rapier3d::{
 };
 use std::fmt;
 
+pub struct State {
+    pub position: Vector,
+    pub velocity: Vector,
+}
+
+impl Default for State {
+    fn default() -> Self {
+        Self {
+            x: 0.0,
+            velocity: Vector::new(0., 0., 0.),
+        }
+    }
+}
+
+impl State {
+    // мне кажется это весьма затратно каждый раз создавать вектор
+    fn get_vector_speed(&self) -> Vector {
+        Vector::new(self.x, self.y, self.z)
+    }
+}
 pub struct Agent {
     //state of agent: x, y, z, vx, vy, vz
-    x: Accuracy,
-    y: Accuracy,
-    z: Accuracy,
-    vx: Accuracy,
-    vy: Accuracy,
-    vz: Accuracy,
-    ax: Accuracy,
-    ay: Accuracy,
-    az: Accuracy,
-    pub controller: PidController,
+    pub state: State,
     pub model: AgentModel,
+    pub motion_controller: MotionController,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -60,16 +72,8 @@ impl AgentModel {
 impl Default for Agent {
     fn default() -> Self {
         Self {
-            x: 0.,
-            y: 0.,
-            z: 0.,
-            vx: 0.,
-            vy: 0.,
-            vz: 0.,
-            ax: 0.,
-            ay: 0.,
-            az: 0.,
-            controller: PidController::from_scalar(1., 1., 1.),
+            state: State::default(),
+            motion_controller: MotionController::default(),
             model: AgentModel {
                 shape: AgentShape::Ball { radius: 10.0 },
                 mass: 0.2,
@@ -82,7 +86,11 @@ impl Default for Agent {
 
 impl fmt::Display for Agent {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "(x={}, y={}, z={})", self.x, self.y, self.z)
+        write!(
+            f,
+            "(x={}, y={}, z={})",
+            self.state.x, self.state.y, self.state.z
+        )
     }
 }
 
@@ -92,6 +100,6 @@ impl Agent {
     }
 
     pub fn update(&mut self, setpoint: Vector, measurement: Vector, dt: Real) -> Vector {
-        self.controller.update(setpoint, measurement, dt)
+        self.motion_controller.update(setpoint, measurement, dt)
     }
 }
