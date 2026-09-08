@@ -9,8 +9,8 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 mod agent;
-mod controller;
 mod constants;
+mod controller;
 // use crate::agent;
 // use crate::controller::PidController;
 //
@@ -74,7 +74,7 @@ pub async fn main() {
         // Создаём новый мир с землёй, одним шаром и целевой меткой.
         let mut simulation = create_simulation(&agent_1);
         // Restart должен также очищать накопленное состояние PID-регулятора.
-        agent_1.controller.reset();
+        agent_1.reset();
 
         // Регистрируем все тела и коллайдеры мира в визуализаторе.
         viewer.set_world(&mut simulation.world);
@@ -194,6 +194,7 @@ fn apply_p_controller(simulation: &mut Simulation, agent: &mut agent::Agent) {
     setpoint.y = 0.0;
     // PID работает с тем же Vector<f32>, что и Rapier.
     let requested_force = agent.update(setpoint, measurement, dt);
+    println!("Requested Force: {:?}", requested_force);
     // Ограничиваем модуль силы для предсказуемого движения и сохранения сцепления с землёй.
     // let controller_force = clamp_magnitude(requested_force, MAX_FORCE);
 

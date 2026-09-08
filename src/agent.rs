@@ -17,17 +17,17 @@ pub struct State {
 impl Default for State {
     fn default() -> Self {
         Self {
-            x: 0.0,
-            velocity: Vector::new(0., 0., 0.),
+            position: Vector::ZERO,
+            velocity: Vector::ZERO,
         }
     }
 }
 
 impl State {
-    // мне кажется это весьма затратно каждый раз создавать вектор
-    fn get_vector_speed(&self) -> Vector {
-        Vector::new(self.x, self.y, self.z)
-    }
+    // // мне кажется это весьма затратно каждый раз создавать вектор
+    // fn get_vector_speed(&self) -> Vector {
+    //     Vector::new(self.x, self.y, self.z)
+    // }
 }
 pub struct Agent {
     //state of agent: x, y, z, vx, vy, vz
@@ -75,7 +75,7 @@ impl Default for Agent {
             state: State::default(),
             motion_controller: MotionController::default(),
             model: AgentModel {
-                shape: AgentShape::Ball { radius: 10.0 },
+                shape: AgentShape::Ball { radius: 0.2 },
                 mass: 0.2,
                 friction: 0.0,
                 restitution: 0.1,
@@ -89,7 +89,7 @@ impl fmt::Display for Agent {
         write!(
             f,
             "(x={}, y={}, z={})",
-            self.state.x, self.state.y, self.state.z
+            self.state.velocity.x, self.state.velocity.y, self.state.velocity.z
         )
     }
 }
@@ -98,8 +98,16 @@ impl Agent {
     pub fn get_status(&self) -> &'static str {
         "Hello"
     }
+    pub fn update(&mut self, desired_position: Vector, actual_state: Vector, dt: Real) -> Vector {
+        println!("Desired Position: {:?}", desired_position);
+        println!("Actual State: {:?}", actual_state);
+        println!("Time Step: {:?}", dt);
+        self.state.position = actual_state;
+        self.motion_controller
+            .update(desired_position, &self.state, dt)
+    }
 
-    pub fn update(&mut self, setpoint: Vector, measurement: Vector, dt: Real) -> Vector {
-        self.motion_controller.update(setpoint, measurement, dt)
+    pub fn reset(&mut self) {
+        self.motion_controller.reset();
     }
 }

@@ -1,10 +1,12 @@
 use crate::constants::Accuracy;
-use crate::controller::{Controller, pid_controller::PidController};
+use crate::{
+    agent::State,
+    controller::{Controller, pid_controller::PidController},
+};
 use rapier3d::math::Vector;
 pub struct MotionController {
     speed_controller: PidController,
     position_controller: PidController,
-    
 }
 
 impl MotionController {}
@@ -19,17 +21,20 @@ impl Default for MotionController {
 }
 
 impl MotionController {
-    fn update(&mut self, desired_state: State, &mut actual_state: State, dt: Accuracy) -> Vector {
-        let speed_vector = self
-            .speed_controller
-            .update(desired_state, actual_state, dt); 
-        let position_vector = self
-            .position_controller.update(desired_position, actual_position, dt);
-        let error: ErrorModel 
-        
+    pub fn update(
+        &mut self,
+        desired_position: Vector,
+        actual_state: &State,
+        dt: Accuracy,
+    ) -> Vector {
+        let desired_velocity =
+            self.position_controller
+                .update(desired_position, actual_state.position, dt);
+        self.speed_controller
+            .update(desired_velocity, actual_state.velocity, dt)
     }
 
-    fn reset(&mut self) {
+    pub fn reset(&mut self) {
         self.speed_controller.reset();
     }
 }
