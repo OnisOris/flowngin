@@ -11,6 +11,7 @@ use std::sync::{
 mod agent;
 mod constants;
 mod controller;
+mod environment;
 // use crate::agent;
 // use crate::controller::PidController;
 //
@@ -188,12 +189,13 @@ fn apply_p_controller(simulation: &mut Simulation, agent: &mut agent::Agent) {
     let dt = simulation.world.integration_parameters.dt;
     // Получаем изменяемую ссылку на единственный динамический шар.
     let ball = &mut simulation.world.bodies[ball_handle];
-    let mut measurement = ball.translation();
+    let state = agent::State::new(ball.translation(), ball.linvel());
+    // let mut measurement = ball.translation();
     // Высотой управляют гравитация и контакт с землёй.
-    measurement.y = 0.0;
+    // measurement.y = 0.0;
     setpoint.y = 0.0;
     // PID работает с тем же Vector<f32>, что и Rapier.
-    let requested_force = agent.update(setpoint, measurement, dt);
+    let requested_force = agent.update(setpoint, state, dt);
     println!("Requested Force: {:?}", requested_force);
     // Ограничиваем модуль силы для предсказуемого движения и сохранения сцепления с землёй.
     // let controller_force = clamp_magnitude(requested_force, MAX_FORCE);

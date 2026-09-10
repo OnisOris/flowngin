@@ -1,6 +1,7 @@
 use crate::constants::Accuracy;
 use crate::controller::boid_controller::BoidsController;
 use crate::controller::{motion_controller::MotionController, pid_controller::PidController};
+use crate::environment::Environment;
 use rapier3d::geometry::Ball;
 use rapier3d::{
     math::{Vector, Vector3},
@@ -24,6 +25,12 @@ impl Default for State {
 }
 
 impl State {
+    pub fn new(position: Vector, velocity: Vector) -> Self {
+        Self {
+            position: position,
+            velocity: velocity,
+        }
+    }
     // // мне кажется это весьма затратно каждый раз создавать вектор
     // fn get_vector_speed(&self) -> Vector {
     //     Vector::new(self.x, self.y, self.z)
@@ -98,11 +105,11 @@ impl Agent {
     pub fn get_status(&self) -> &'static str {
         "Hello"
     }
-    pub fn update(&mut self, desired_position: Vector, actual_state: Vector, dt: Real) -> Vector {
+    pub fn update(&mut self, desired_position: Vector, actual_state: State, dt: Real) -> Vector {
         println!("Desired Position: {:?}", desired_position);
-        println!("Actual State: {:?}", actual_state);
+        // println!("Actual State: {:?}", actual_state);
         println!("Time Step: {:?}", dt);
-        self.state.position = actual_state;
+        self.state = actual_state;
         self.motion_controller
             .update(desired_position, &self.state, dt)
     }

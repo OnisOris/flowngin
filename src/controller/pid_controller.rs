@@ -23,16 +23,16 @@ pub struct PidController {
 impl Default for PidController {
     fn default() -> Self {
         Self {
-            kp: Vector::ZERO,
-            ki: Vector::ZERO,
-            kd: Vector::ZERO,
+            kp: Vector::new(10., 10., 10.),
+            ki: Vector::new(1., 0., 2.),
+            kd: Vector::ONE,
             integral: Vector::ZERO,
             prev_error: None,
             prev_measurement: None,
             prev_derivative: Vector::ZERO,
             out_min: None,
-            out_max: None,
-            out_max_norm: None,
+            out_max: Some(Vector::ONE),
+            out_max_norm: Some(10.0),
             derivative_on_measurement: true,
             derivative_filter: Vector::ONE,
         }

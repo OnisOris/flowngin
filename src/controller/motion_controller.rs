@@ -35,6 +35,7 @@ impl MotionController {
     }
 
     pub fn reset(&mut self) {
+        self.position_controller.reset();
         self.speed_controller.reset();
     }
 }
