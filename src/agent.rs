@@ -1,15 +1,12 @@
-use crate::constants::Accuracy;
-use crate::controller::boid_controller::BoidsController;
-use crate::controller::{motion_controller::MotionController, pid_controller::PidController};
+use crate::controller::{boid_controller::BoidsController, motion_controller::MotionController};
 use crate::environment::Environment;
-use rapier3d::geometry::Ball;
 use rapier3d::{
-    math::{Vector, Vector3},
-    na::Vector6,
+    math::Vector,
     prelude::{ColliderBuilder, Real},
 };
 use std::fmt;
 
+#[derive(Clone, Copy, Debug)]
 pub struct State {
     pub position: Vector,
     pub velocity: Vector,
@@ -27,20 +24,18 @@ impl Default for State {
 impl State {
     pub fn new(position: Vector, velocity: Vector) -> Self {
         Self {
-            position: position,
-            velocity: velocity,
+            position,
+            velocity,
         }
     }
-    // // мне кажется это весьма затратно каждый раз создавать вектор
-    // fn get_vector_speed(&self) -> Vector {
-    //     Vector::new(self.x, self.y, self.z)
-    // }
 }
+
 pub struct Agent {
-    //state of agent: x, y, z, vx, vy, vz
+    pub id: usize,
     pub state: State,
     pub model: AgentModel,
     pub motion_controller: MotionController,
+    pub boid_controller: BoidsController,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -48,6 +43,7 @@ pub enum AgentShape {
     Ball { radius: Real },
     Cuboid { half_extents: Vector },
 }
+
 pub struct AgentModel {
     pub shape: AgentShape,
     pub mass: Real,
@@ -76,11 +72,13 @@ impl AgentModel {
     }
 }
 
-impl Default for Agent {
-    fn default() -> Self {
+impl Agent {
+    pub fn new(id: usize) -> Self {
         Self {
+            id,
             state: State::default(),
             motion_controller: MotionController::default(),
+            boid_controller: BoidsController::default(),
             model: AgentModel {
                 shape: AgentShape::Ball { radius: 0.2 },
                 mass: 0.2,
@@ -89,32 +87,49 @@ impl Default for Agent {
             },
         }
     }
+
+    pub fn get_status(&self) -> &'static str {
+        "Hello"
+    }
+
+    pub fn update(
+        &mut self,
+        desired_position: Vector,
+        actual_state: State,
+        dt: Real,
+        environment: &Environment,
+    ) -> Vector {
+        println!("Agent[{}] Desired Position: {:?}", self.id, desired_position);
+        println!("Time Step: {:?}", dt);
+        self.state = actual_state;
+
+        let flock_force = self.boid_controller.update(environment, self.id, dt);
+
+        let motion_force = self
+            .motion_controller
+            .update(desired_position, &self.state, dt);
+
+        motion_force + flock_force
+    }
+
+    pub fn reset(&mut self) {
+        self.motion_controller.reset();
+        self.boid_controller.reset();
+    }
+}
+
+impl Default for Agent {
+    fn default() -> Self {
+        Self::new(0)
+    }
 }
 
 impl fmt::Display for Agent {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "(x={}, y={}, z={})",
-            self.state.velocity.x, self.state.velocity.y, self.state.velocity.z
+            "Agent[{}] (x={}, y={}, z={})",
+            self.id, self.state.velocity.x, self.state.velocity.y, self.state.velocity.z
         )
-    }
-}
-
-impl Agent {
-    pub fn get_status(&self) -> &'static str {
-        "Hello"
-    }
-    pub fn update(&mut self, desired_position: Vector, actual_state: State, dt: Real) -> Vector {
-        println!("Desired Position: {:?}", desired_position);
-        // println!("Actual State: {:?}", actual_state);
-        println!("Time Step: {:?}", dt);
-        self.state = actual_state;
-        self.motion_controller
-            .update(desired_position, &self.state, dt)
-    }
-
-    pub fn reset(&mut self) {
-        self.motion_controller.reset();
     }
 }

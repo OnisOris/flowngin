@@ -1,10 +1,10 @@
-use rapier3d::prelude::{Real, Vector};
+use rapier3d::prelude::Vector;
 pub mod boid_controller;
 pub mod motion_controller;
 pub mod pid_controller;
 use crate::constants::Accuracy;
 
-trait Controller {
+pub trait Controller {
     fn update(&mut self, setpoint: Vector, measurement: Vector, dt: Accuracy) -> Vector;
     fn reset(&mut self);
 }

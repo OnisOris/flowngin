@@ -1305,6 +1305,7 @@ name = "flowngin"
 version = "0.1.0"
 dependencies = [
  "ctrlc",
+ "glamx",
  "kiss3d",
  "rapier3d",
  "rapier_testbed3d",

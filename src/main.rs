@@ -1,5 +1,7 @@
 // Импортируем цвет, чтобы визуально отличить шар и целевую точку.
 use kiss3d::color::Color;
+// Импортируем события окна: кнопки мыши и их состояние.
+use kiss3d::event::{Action, MouseButton, WindowEvent};
 // Импортируем основные типы Rapier 3D: физический мир, тела, коллайдеры и векторы.
 use rapier3d::prelude::*;
 // Импортируем описание демо и нативное окно визуализации Rapier Testbed.
@@ -12,48 +14,42 @@ mod agent;
 mod constants;
 mod controller;
 mod environment;
+mod swarm;
 // use crate::agent;
 // use crate::controller::PidController;
 //
 // Половина высоты земли: её верхняя поверхность находится на Y = 0.1.
 const GROUND_HALF_HEIGHT: f32 = 0.1;
-// Радиус единственного динамического шара.
+// Радиус динамических шаров как стартовая высота.
 const BALL_RADIUS: f32 = 0.5;
-// Коэффициент P-регулятора: чем он больше, тем сильнее шар тянется к цели.
-const P_GAIN: f32 = 1.5;
-// Ограничиваем силу, чтобы шар преимущественно катился, а не скользил по земле.
-const MAX_FORCE: f32 = 4.0;
+// Количество агентов в рое.
+const AGENT_COUNT: usize = 5;
+// Сколько агентов летят к первой цели (остальные — ко второй).
+const GROUP_A_COUNT: usize = 3;
 
 // Храним физический мир и данные, необходимые контроллеру и визуализатору.
 struct Simulation {
     // Полный физический мир Rapier.
     world: PhysicsWorld,
-    // Идентификатор динамического шара внутри `world.bodies`.
-    ball_handle: RigidBodyHandle,
+    // Идентификаторы динамических шаров внутри `world.bodies`.
+    ball_handles: Vec<RigidBodyHandle>,
     // Идентификатор неподвижной земли для настройки её цвета.
     ground_handle: RigidBodyHandle,
-    // Идентификатор сенсорной метки цели для настройки её цвета.
-    target_collider_handle: ColliderHandle,
-    // Точка, к которой должен катиться центр шара.
-    target: Vector,
+    // Идентификаторы сенсорных меток целей для настройки их цвета.
+    target_collider_handles: Vec<ColliderHandle>,
+    // Тела-носители маркеров целей (перемещаются перетаскиванием мышью).
+    target_body_handles: Vec<RigidBodyHandle>,
+    // Точки, к которым должны катиться центры шаров.
+    targets: Vec<Vector>,
 }
 
 // Этот атрибут подготавливает асинхронный цикл нативного окна Kiss3d.
 #[kiss3d::main]
 // Главная асинхронная функция — с неё начинается выполнение программы.
 pub async fn main() {
-    let mut agent_1 = agent::Agent::default();
-    let info = agent_1.get_status();
+    let mut swarm = swarm::Swarm::new(AGENT_COUNT);
+    let info = swarm.agents[0].get_status();
     println!("{}", info);
-    // На 30 уже флексит
-    let coef: f32 = 30.0;
-    let range: f32 = 9999999999999.;
-    // let mut controller = controller::PidController::from_scalar(coef, coef, coef);
-    // controller.set_outputs_limits(
-    //     Vec3::new(-range, -range, -range),
-    //     Vec3::new(range, range, range),
-    // );
-    // controller.set_outputs_limits_norm(range);
     // Этот флаг сообщает графическому циклу, что пользователь нажал Ctrl+C.
     let shutdown_requested = Arc::new(AtomicBool::new(false));
     // Передаём обработчику отдельную ссылку на тот же атомарный флаг.
@@ -72,32 +68,43 @@ pub async fn main() {
     loop {
         // Очищаем графику и состояние предыдущего запуска симуляции.
         viewer.clear_scene();
-        // Создаём новый мир с землёй, одним шаром и целевой меткой.
-        let mut simulation = create_simulation(&agent_1);
+        // Восстанавливаем панель настроек агентов (например, после смены примера).
+        register_agent_settings(&mut viewer);
+        // Создаём новый мир с землёй, роем из пяти шаров и двумя целями.
+        let mut simulation = create_simulation(&swarm.agents);
         // Restart должен также очищать накопленное состояние PID-регулятора.
-        agent_1.reset();
+        swarm.reset();
 
         // Регистрируем все тела и коллайдеры мира в визуализаторе.
         viewer.set_world(&mut simulation.world);
         // Красим землю в спокойный серый цвет.
         viewer.set_initial_body_color(simulation.ground_handle, Color::new(0.45, 0.48, 0.52, 1.0));
-        // Красим управляемый шар в синий цвет.
-        viewer.set_initial_body_color(simulation.ball_handle, Color::new(0.15, 0.4, 0.95, 1.0));
-        // Красим сенсорную метку целевой точки в зелёный цвет.
-        viewer.set_initial_collider_color(
-            simulation.target_collider_handle,
-            Color::new(0.1, 0.85, 0.25, 1.0),
-        );
+        // Первая группа — синие, вторая — оранжевые.
+        for (i, handle) in simulation.ball_handles.iter().enumerate() {
+            let color = if i < GROUP_A_COUNT {
+                Color::new(0.15, 0.4, 0.95, 1.0)
+            } else {
+                Color::new(0.9, 0.6, 0.1, 1.0)
+            };
+            viewer.set_initial_body_color(*handle, color);
+        }
+        // Красим сенсорные метки целей в зелёный цвет.
+        for handle in &simulation.target_collider_handles {
+            viewer.set_initial_collider_color(*handle, Color::new(0.1, 0.85, 0.25, 1.0));
+        }
 
-        // Ставим камеру так, чтобы одновременно были видны старт и цель.
+        // Ставим камеру так, чтобы одновременно были видны старт и обе цели.
         viewer.look_at(
             // Позиция камеры в трёхмерном мире.
-            Vector::new(12.0, 9.0, 15.0),
-            // Точка между стартовой позицией шара и его целью.
-            Vector::new(4.0, 0.0, -1.5),
+            Vector::new(18.0, 14.0, 22.0),
+            // Точка между стартовыми позициями шаров и их целями.
+            Vector::new(0.0, 0.0, 0.0),
         );
 
         // Отрисовываем кадры, пока пользователь не закроет окно или не нажмёт Restart.
+        // Правая кнопка мыши перетаскивает маркер цели по земле.
+        let mut prev_right_down = false;
+        let mut dragged_target: Option<usize> = None;
         while viewer.render_frame(&mut simulation.world).await {
             // Проверяем флаг после каждого отрисованного кадра.
             if shutdown_requested.load(Ordering::Acquire) {
@@ -107,10 +114,13 @@ pub async fn main() {
                 break;
             }
 
+            // Перетаскивание цели работает и на паузе.
+            handle_target_dragging(&mut simulation, &viewer, &mut prev_right_down, &mut dragged_target);
+
             // Учитываем кнопки Play, Pause и Step в интерфейсе Testbed.
             if viewer.simulating() {
                 // Пересчитываем управляющую силу по текущему положению шара.
-                apply_p_controller(&mut simulation, &mut agent_1);
+                apply_swarm_controller(&mut simulation, &mut swarm, &mut viewer);
                 // Продвигаем физический мир на один фиксированный временной шаг.
                 simulation.world.step();
             }
@@ -127,8 +137,116 @@ pub async fn main() {
     println!("Симуляция завершена");
 }
 
+// Регистрируем живые настройки роя в панели "Example Settings" тестбеда.
+// `set_restart_on_change(false)` не даёт изменению перезапускать симуляцию:
+// значения читаются в `apply_swarm_controller` каждый физический шаг.
+fn register_agent_settings(viewer: &mut TestbedViewer) {
+    let settings = viewer.example_settings_mut();
+    settings.set_restart_on_change("perception_radius", false);
+    settings.get_or_set_f32("perception_radius", 6.0, 0.5..=15.0);
+    settings.set_restart_on_change("separation_zone", false);
+    settings.get_or_set_f32("separation_zone", 3.0, 0.5..=12.0);
+    settings.set_restart_on_change("separation_weight", false);
+    settings.get_or_set_f32("separation_weight", 4.0, 0.5..=20.0);
+    settings.set_restart_on_change("cohesion_weight", false);
+    settings.get_or_set_f32("cohesion_weight", 0.5, 0.0..=10.0);
+    settings.set_restart_on_change("alignment_weight", false);
+    settings.get_or_set_f32("alignment_weight", 0.5, 0.0..=10.0);
+    settings.set_restart_on_change("max_speed", false);
+    settings.get_or_set_f32("max_speed", 5.0, 0.5..=15.0);
+    settings.set_restart_on_change("draw_arrows", false);
+    settings.get_or_set_bool("draw_arrows", true);
+    settings.set_restart_on_change("arrow_scale", false);
+    settings.get_or_set_f32("arrow_scale", 0.4, 0.05..=3.0);
+    settings.set_restart_on_change("drag_targets", false);
+    settings.get_or_set_bool("drag_targets", true);
+}
+
+// Перетаскивание маркера цели правой кнопкой мыши по плоскости земли.
+fn handle_target_dragging(
+    simulation: &mut Simulation,
+    viewer: &TestbedViewer,
+    prev_right_down: &mut bool,
+    dragged_target: &mut Option<usize>,
+) {
+    // Пользователь мог отключить перетаскивание в панели настроек.
+    let enabled = viewer
+        .example_settings()
+        .get_bool("drag_targets")
+        .unwrap_or(true);
+    if !enabled {
+        *prev_right_down = false;
+        *dragged_target = None;
+        return;
+    }
+
+    let right_down = viewer.window().get_mouse_button(MouseButton::Button3) == Action::Press;
+
+    // Точка под курсором на уровне земли.
+    let hit = viewer.mouse().ray.and_then(|(origin, dir)| ground_hit(origin, dir));
+
+    if right_down && !*prev_right_down {
+        // Начали тащить: привязываемся к ближайшей к курсору цели.
+        *dragged_target = hit.map(|position| nearest_target_index(&position, &simulation.targets));
+    }
+
+    if right_down {
+        if let (Some(hit), Some(index)) = (hit, *dragged_target) {
+            move_target(simulation, index, hit);
+        }
+    } else {
+        *dragged_target = None;
+    }
+
+    *prev_right_down = right_down;
+}
+
+// Пересечение луча из камеры с плоскостью земли.
+fn ground_hit(ray_origin: glamx::Vec3, ray_dir: glamx::Vec3) -> Option<Vector> {
+    if ray_dir.y.abs() < 1e-6 {
+        // Луч почти горизонтален — пол не пересекает.
+        return None;
+    }
+    let t = (GROUND_HALF_HEIGHT - ray_origin.y) / ray_dir.y;
+    if t <= 0.0 {
+        return None;
+    }
+    Some(Vector::new(
+        ray_origin.x + ray_dir.x * t,
+        GROUND_HALF_HEIGHT,
+        ray_origin.z + ray_dir.z * t,
+    ))
+}
+
+// Индекс цели, ближайшей к заданной точке (в плоскости XZ).
+fn nearest_target_index(position: &Vector, targets: &[Vector]) -> usize {
+    let mut best = 0;
+    let mut best_distance_sq = f32::MAX;
+    for (i, target) in targets.iter().enumerate() {
+        let dx = target.x - position.x;
+        let dz = target.z - position.z;
+        let distance_sq = dx * dx + dz * dz;
+        if distance_sq < best_distance_sq {
+            best_distance_sq = distance_sq;
+            best = i;
+        }
+    }
+    best
+}
+
+// Перемещаем цель и её зелёный маркер в новую точку.
+fn move_target(simulation: &mut Simulation, index: usize, position: Vector) {
+    let mut target = simulation.targets[index];
+    target.x = position.x;
+    target.z = position.z;
+    simulation.targets[index] = target;
+
+    let marker_position = Vector::new(position.x, GROUND_HALF_HEIGHT + 0.02, position.z);
+    simulation.world.bodies[simulation.target_body_handles[index]].set_translation(marker_position, false);
+}
+
 // Создаём исходное состояние всей демонстрационной сцены.
-fn create_simulation(agent_in: &agent::Agent) -> Simulation {
+fn create_simulation(agents: &[agent::Agent]) -> Simulation {
     // PhysicsWorld уже содержит гравитацию, pipeline, тела, коллайдеры и решатели Rapier.
     let mut world = PhysicsWorld::new();
 
@@ -140,70 +258,187 @@ fn create_simulation(agent_in: &agent::Agent) -> Simulation {
         ColliderBuilder::cuboid(20.0, GROUND_HALF_HEIGHT, 20.0).friction(1.0),
     );
 
-    // Ставим центр шара непосредственно над верхней поверхностью земли.
-    let ball_start = Vector::new(0.0, GROUND_HALF_HEIGHT + BALL_RADIUS, 0.0);
-    // Цель находится в стороне от шара, но остаётся на той же высоте.
-    let target = Vector::new(8.0, GROUND_HALF_HEIGHT + BALL_RADIUS, -3.0);
+    // Стартовые позиции пяти шаров: тесный кластер, чтобы роевые силы были заметны.
+    let starts = [
+        Vector::new(0.0, GROUND_HALF_HEIGHT + BALL_RADIUS, 0.0),
+        Vector::new(0.6, GROUND_HALF_HEIGHT + BALL_RADIUS, 0.0),
+        Vector::new(-0.6, GROUND_HALF_HEIGHT + BALL_RADIUS, 0.3),
+        Vector::new(0.3, GROUND_HALF_HEIGHT + BALL_RADIUS, -0.6),
+        Vector::new(-0.3, GROUND_HALF_HEIGHT + BALL_RADIUS, -0.4),
+    ];
 
-    // Создаём единственный динамический шар и сохраняем его идентификатор.
-    let (ball_handle, _) = world.insert(
-        // Небольшое линейное и угловое затухание помогает P-регулятору успокоить колебания.
-        RigidBodyBuilder::dynamic()
-            .translation(ball_start)
-            .linear_damping(0.8)
-            .angular_damping(0.3),
-        // Высокое трение заставляет шар катиться; малая упругость убирает лишние прыжки.
-        // ColliderBuilder::cuboid(BALL_RADIUS, BALL_RADIUS, BALL_RADIUS)
-        //     .friction(1.0)
-        //     .restitution(0.1),
-        agent_in.model.collider(),
-    );
+    // Создаём динамические шары и сохраняем их идентификаторы.
+    let mut ball_handles = Vec::new();
+    for (i, start) in starts.iter().enumerate() {
+        let (ball_handle, _) = world.insert(
+            // Небольшое линейное и угловое затухание помогает PID успокоить колебания.
+            RigidBodyBuilder::dynamic()
+                .translation(*start)
+                .linear_damping(0.8)
+                .angular_damping(0.3),
+            agents[i].model.collider(),
+        );
+        ball_handles.push(ball_handle);
+    }
 
-    // Размещаем плоскую метку немного выше поверхности земли.
-    let target_marker_position = Vector::new(target.x, GROUND_HALF_HEIGHT + 0.02, target.z);
-    // Создаём зелёный цилиндр-маркер, который не участвует в столкновениях.
-    let (_, target_collider_handle) = world.insert(
-        // Метка неподвижна и только показывает положение целевой точки.
-        RigidBodyBuilder::fixed().translation(target_marker_position),
-        // `sensor(true)` позволяет шару свободно проезжать через метку.
-        ColliderBuilder::cylinder(0.02, 0.4).sensor(true),
-    );
+    // Две целевые точки на той же высоте, что и шары.
+    let targets = [
+        Vector::new(8.0, GROUND_HALF_HEIGHT + BALL_RADIUS, -3.0),
+        Vector::new(-7.0, GROUND_HALF_HEIGHT + BALL_RADIUS, 3.0),
+    ];
 
-    // Возвращаем мир вместе с handle’ами и координатами цели.
+    // Размещаем плоские метки немного выше поверхности земли.
+    let mut target_collider_handles = Vec::new();
+    let mut target_body_handles = Vec::new();
+    for target in &targets {
+        let target_marker_position = Vector::new(target.x, GROUND_HALF_HEIGHT + 0.02, target.z);
+        // Создаём зелёный цилиндр-маркер, который не участвует в столкновениях.
+        let (target_body_handle, target_collider_handle) = world.insert(
+            // Метка неподвижна и только показывает положение целевой точки.
+            RigidBodyBuilder::fixed().translation(target_marker_position),
+            // `sensor(true)` позволяет шарам свободно проезжать через метку.
+            ColliderBuilder::cylinder(0.02, 0.4).sensor(true),
+        );
+        target_collider_handles.push(target_collider_handle);
+        target_body_handles.push(target_body_handle);
+    }
+
+    // Возвращаем мир вместе с handle'ами и координатами целей.
     Simulation {
         world,
-        ball_handle,
+        ball_handles,
         ground_handle,
-        target_collider_handle,
-        target,
+        target_collider_handles,
+        target_body_handles,
+        targets: targets.to_vec(),
     }
 }
 
-// Вычисляем и прикладываем горизонтальную силу P-регулятора.
-fn apply_p_controller(simulation: &mut Simulation, agent: &mut agent::Agent) {
-    // Копируем значения до изменяемого заимствования физического тела.
-    let ball_handle = simulation.ball_handle;
-    // Копируем целевую точку, чтобы использовать её в расчёте ошибки.
-    let mut setpoint = simulation.target;
+// Вычисляем и прикладываем горизонтальную силу для каждого агента роя.
+fn apply_swarm_controller(
+    simulation: &mut Simulation,
+    swarm: &mut swarm::Swarm,
+    viewer: &mut TestbedViewer,
+) {
+    // Читаем настройки из UI-панели один раз за физический шаг.
+    let settings = viewer.example_settings();
+    let perception_radius = settings.get_f32("perception_radius").unwrap_or(6.0);
+    let separation_zone = settings.get_f32("separation_zone").unwrap_or(3.0);
+    let separation_weight = settings.get_f32("separation_weight").unwrap_or(4.0);
+    let cohesion_weight = settings.get_f32("cohesion_weight").unwrap_or(0.5);
+    let alignment_weight = settings.get_f32("alignment_weight").unwrap_or(0.5);
+    let max_speed = settings.get_f32("max_speed").unwrap_or(5.0);
+    let draw_arrows = settings.get_bool("draw_arrows").unwrap_or(true);
+    let arrow_scale = settings.get_f32("arrow_scale").unwrap_or(0.4);
+
+    // Переносим настройки в каждого агента.
+    for agent in &mut swarm.agents {
+        agent.boid_controller.perception_radius = perception_radius;
+        agent.boid_controller.separation_coeff = separation_zone;
+        agent.boid_controller.separation_weight = separation_weight;
+        agent.boid_controller.cohesion_weight = cohesion_weight;
+        agent.boid_controller.alignment_weight = alignment_weight;
+        agent.boid_controller.max_speed = max_speed;
+    }
+
     // PID вызывается один раз на физический шаг, поэтому берём dt из Rapier.
     let dt = simulation.world.integration_parameters.dt;
-    // Получаем изменяемую ссылку на единственный динамический шар.
-    let ball = &mut simulation.world.bodies[ball_handle];
-    let state = agent::State::new(ball.translation(), ball.linvel());
-    // let mut measurement = ball.translation();
-    // Высотой управляют гравитация и контакт с землёй.
-    // measurement.y = 0.0;
-    setpoint.y = 0.0;
-    // PID работает с тем же Vector<f32>, что и Rapier.
-    let requested_force = agent.update(setpoint, state, dt);
-    println!("Requested Force: {:?}", requested_force);
-    // Ограничиваем модуль силы для предсказуемого движения и сохранения сцепления с землёй.
-    // let controller_force = clamp_magnitude(requested_force, MAX_FORCE);
 
-    // Удаляем силу, рассчитанную на предыдущем шаге; гравитацию это не отключает.
-    ball.reset_forces(false);
-    // Прикладываем новое воздействие и будим шар, если Rapier успел его усыпить.
-    ball.add_force(requested_force, true);
+    // Первый проход: собираем актуальные состояния всех шаров в среду,
+    // чтобы каждый агент видел соседей по их текущим позициям.
+    let states: Vec<agent::State> = simulation
+        .ball_handles
+        .iter()
+        .map(|handle| {
+            let body = &simulation.world.bodies[*handle];
+            agent::State::new(body.translation(), body.linvel())
+        })
+        .collect();
+    swarm.environment.set_states(states);
+    let environment = &swarm.environment;
+
+    // Второй проход: считаем силу каждому агенту и прикладываем к его шару.
+    for i in 0..swarm.agent_count() {
+        // Первая группа летит к первой цели, остальные — ко второй.
+        let target = if i < GROUP_A_COUNT {
+            simulation.targets[0]
+        } else {
+            simulation.targets[1]
+        };
+        let mut setpoint = target;
+        setpoint.y = 0.0;
+
+        let ball_handle = simulation.ball_handles[i];
+        let ball = &mut simulation.world.bodies[ball_handle];
+        let state = agent::State::new(ball.translation(), ball.linvel());
+
+        let requested_force = swarm.agents[i].update(setpoint, state, dt, environment);
+        println!("Requested Force: {:?}", requested_force);
+
+        ball.reset_forces(false);
+        ball.add_force(requested_force, true);
+
+        // Визуализируем итоговый вектор управления в цвете группы агента.
+        if draw_arrows {
+            let color = if i < GROUP_A_COUNT {
+                Color::new(0.15, 0.4, 0.95, 1.0)
+            } else {
+                Color::new(0.9, 0.6, 0.1, 1.0)
+            };
+            draw_force_arrow(viewer.window_mut(), ball.translation(), requested_force, color, arrow_scale);
+        }
+    }
+}
+
+// Рисуем стрелку силы из точки `start` вдоль вектора `force`.
+// Длина стрелки пропорциональна модулю силы: `length = |force| * scale`.
+fn draw_force_arrow(
+    window: &mut kiss3d::window::Window,
+    start: Vector,
+    force: Vector,
+    color: Color,
+    scale: f32,
+) {
+    let magnitude = force.length();
+    if magnitude < 1e-6 {
+        // Нулевая сила — никакой стрелки.
+        return;
+    }
+    // Верхний предел защищает от гигантских всплесков силы (например, на старте).
+    let length = (magnitude * scale).min(6.0);
+    let unit = force / magnitude;
+    let end = start + unit * length;
+
+    // Основная линия стрелки.
+    window.draw_line(
+        glamx::Vec3::new(start.x, start.y, start.z),
+        glamx::Vec3::new(end.x, end.y, end.z),
+        color,
+        2.0,
+        false,
+    );
+
+    // Наконечник «Рогаткой»: размеры привязаны к длине стрелки, чтобы
+    // наконечник не превышал древка у коротких стрелок.
+    let perpendicular = Vector::new(-unit.z, 0.0, unit.x);
+    let head = length.clamp(0.08, 0.6) * 0.5;
+    let flair = head * 0.4;
+    let feather_a = end + (-unit * head + perpendicular * flair);
+    let feather_b = end + (-unit * head - perpendicular * flair);
+    window.draw_line(
+        glamx::Vec3::new(end.x, end.y, end.z),
+        glamx::Vec3::new(feather_a.x, feather_a.y, feather_a.z),
+        color,
+        2.0,
+        false,
+    );
+    window.draw_line(
+        glamx::Vec3::new(end.x, end.y, end.z),
+        glamx::Vec3::new(feather_b.x, feather_b.y, feather_b.z),
+        color,
+        2.0,
+        false,
+    );
 }
 
 // Ограничиваем длину вектора заданным максимальным значением.
