@@ -115,7 +115,12 @@ pub async fn main() {
             }
 
             // Перетаскивание цели работает и на паузе.
-            handle_target_dragging(&mut simulation, &viewer, &mut prev_right_down, &mut dragged_target);
+            handle_target_dragging(
+                &mut simulation,
+                &viewer,
+                &mut prev_right_down,
+                &mut dragged_target,
+            );
 
             // Учитываем кнопки Play, Pause и Step в интерфейсе Testbed.
             if viewer.simulating() {
@@ -143,21 +148,21 @@ pub async fn main() {
 fn register_agent_settings(viewer: &mut TestbedViewer) {
     let settings = viewer.example_settings_mut();
     settings.set_restart_on_change("perception_radius", false);
-    settings.get_or_set_f32("perception_radius", 6.0, 0.5..=15.0);
+    settings.get_or_set_f32("perception_radius", 6.0, 0.0..=15.0);
     settings.set_restart_on_change("separation_zone", false);
-    settings.get_or_set_f32("separation_zone", 3.0, 0.5..=12.0);
+    settings.get_or_set_f32("separation_zone", 3.0, 0.0..=12.0);
     settings.set_restart_on_change("separation_weight", false);
-    settings.get_or_set_f32("separation_weight", 4.0, 0.5..=20.0);
+    settings.get_or_set_f32("separation_weight", 4.0, 0.0..=20.0);
     settings.set_restart_on_change("cohesion_weight", false);
     settings.get_or_set_f32("cohesion_weight", 0.5, 0.0..=10.0);
     settings.set_restart_on_change("alignment_weight", false);
     settings.get_or_set_f32("alignment_weight", 0.5, 0.0..=10.0);
     settings.set_restart_on_change("max_speed", false);
-    settings.get_or_set_f32("max_speed", 5.0, 0.5..=15.0);
+    settings.get_or_set_f32("max_speed", 5.0, 0.0..=15.0);
     settings.set_restart_on_change("draw_arrows", false);
     settings.get_or_set_bool("draw_arrows", true);
     settings.set_restart_on_change("arrow_scale", false);
-    settings.get_or_set_f32("arrow_scale", 0.4, 0.05..=3.0);
+    settings.get_or_set_f32("arrow_scale", 0.4, 0.0..=3.0);
     settings.set_restart_on_change("drag_targets", false);
     settings.get_or_set_bool("drag_targets", true);
 }
@@ -183,7 +188,10 @@ fn handle_target_dragging(
     let right_down = viewer.window().get_mouse_button(MouseButton::Button3) == Action::Press;
 
     // Точка под курсором на уровне земли.
-    let hit = viewer.mouse().ray.and_then(|(origin, dir)| ground_hit(origin, dir));
+    let hit = viewer
+        .mouse()
+        .ray
+        .and_then(|(origin, dir)| ground_hit(origin, dir));
 
     if right_down && !*prev_right_down {
         // Начали тащить: привязываемся к ближайшей к курсору цели.
@@ -242,7 +250,8 @@ fn move_target(simulation: &mut Simulation, index: usize, position: Vector) {
     simulation.targets[index] = target;
 
     let marker_position = Vector::new(position.x, GROUND_HALF_HEIGHT + 0.02, position.z);
-    simulation.world.bodies[simulation.target_body_handles[index]].set_translation(marker_position, false);
+    simulation.world.bodies[simulation.target_body_handles[index]]
+        .set_translation(marker_position, false);
 }
 
 // Создаём исходное состояние всей демонстрационной сцены.
@@ -265,6 +274,7 @@ fn create_simulation(agents: &[agent::Agent]) -> Simulation {
         Vector::new(-0.6, GROUND_HALF_HEIGHT + BALL_RADIUS, 0.3),
         Vector::new(0.3, GROUND_HALF_HEIGHT + BALL_RADIUS, -0.6),
         Vector::new(-0.3, GROUND_HALF_HEIGHT + BALL_RADIUS, -0.4),
+        // Vector::new(-1.0, GROUND_HALF_HEIGHT + BALL_RADIUS, -1.4),
     ];
 
     // Создаём динамические шары и сохраняем их идентификаторы.
@@ -385,7 +395,13 @@ fn apply_swarm_controller(
             } else {
                 Color::new(0.9, 0.6, 0.1, 1.0)
             };
-            draw_force_arrow(viewer.window_mut(), ball.translation(), requested_force, color, arrow_scale);
+            draw_force_arrow(
+                viewer.window_mut(),
+                ball.translation(),
+                requested_force,
+                color,
+                arrow_scale,
+            );
         }
     }
 }

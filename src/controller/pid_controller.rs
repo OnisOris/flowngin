@@ -24,7 +24,7 @@ impl Default for PidController {
     fn default() -> Self {
         Self {
             kp: Vector::new(10., 10., 10.),
-            ki: Vector::new(1., 0., 2.),
+            ki: Vector::new(0., 0., 0.),
             kd: Vector::ONE,
             integral: Vector::ZERO,
             prev_error: None,
