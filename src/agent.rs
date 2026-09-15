@@ -23,10 +23,7 @@ impl Default for State {
 
 impl State {
     pub fn new(position: Vector, velocity: Vector) -> Self {
-        Self {
-            position,
-            velocity,
-        }
+        Self { position, velocity }
     }
 }
 
@@ -99,7 +96,10 @@ impl Agent {
         dt: Real,
         environment: &Environment,
     ) -> Vector {
-        println!("Agent[{}] Desired Position: {:?}", self.id, desired_position);
+        println!(
+            "Agent[{}] Desired Position: {:?}",
+            self.id, desired_position
+        );
         println!("Time Step: {:?}", dt);
         self.state = actual_state;
 
@@ -109,7 +109,7 @@ impl Agent {
             .motion_controller
             .update(desired_position, &self.state, dt);
 
-        motion_force + flock_force
+        motion_force + flock_force * 0.0
     }
 
     pub fn reset(&mut self) {

@@ -6,6 +6,7 @@ use kiss3d::event::{Action, MouseButton, WindowEvent};
 use rapier3d::prelude::*;
 // Импортируем описание демо и нативное окно визуализации Rapier Testbed.
 use rapier_testbed3d::{ExampleEntry, TestbedViewer};
+use std::path::Path;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -15,11 +16,10 @@ mod constants;
 mod controller;
 mod environment;
 mod swarm;
+mod terrain;
 // use crate::agent;
 // use crate::controller::PidController;
 //
-// Половина высоты земли: её верхняя поверхность находится на Y = 0.1.
-const GROUND_HALF_HEIGHT: f32 = 0.1;
 // Радиус динамических шаров как стартовая высота.
 const BALL_RADIUS: f32 = 0.5;
 // Количество агентов в рое.
@@ -41,6 +41,8 @@ struct Simulation {
     target_body_handles: Vec<RigidBodyHandle>,
     // Точки, к которым должны катиться центры шаров.
     targets: Vec<Vector>,
+    // Генерируемый STL-рельеф, служащий полом.
+    terrain: terrain::Terrain,
 }
 
 // Этот атрибут подготавливает асинхронный цикл нативного окна Kiss3d.
@@ -93,10 +95,10 @@ pub async fn main() {
             viewer.set_initial_collider_color(*handle, Color::new(0.1, 0.85, 0.25, 1.0));
         }
 
-        // Ставим камеру так, чтобы одновременно были видны старт и обе цели.
+        // Ставим камеру так, чтобы были видны старт, обе цели и рельеф.
         viewer.look_at(
             // Позиция камеры в трёхмерном мире.
-            Vector::new(18.0, 14.0, 22.0),
+            Vector::new(30.0, 26.0, 42.0),
             // Точка между стартовыми позициями шаров и их целями.
             Vector::new(0.0, 0.0, 0.0),
         );
@@ -187,11 +189,11 @@ fn handle_target_dragging(
 
     let right_down = viewer.window().get_mouse_button(MouseButton::Button3) == Action::Press;
 
-    // Точка под курсором на уровне земли.
+    // Точка под курсором на рельефе (raycast по миру).
     let hit = viewer
         .mouse()
         .ray
-        .and_then(|(origin, dir)| ground_hit(origin, dir));
+        .and_then(|(origin, dir)| ground_hit(&simulation.world, origin, dir));
 
     if right_down && !*prev_right_down {
         // Начали тащить: привязываемся к ближайшей к курсору цели.
@@ -209,21 +211,17 @@ fn handle_target_dragging(
     *prev_right_down = right_down;
 }
 
-// Пересечение луча из камеры с плоскостью земли.
-fn ground_hit(ray_origin: glamx::Vec3, ray_dir: glamx::Vec3) -> Option<Vector> {
-    if ray_dir.y.abs() < 1e-6 {
-        // Луч почти горизонтален — пол не пересекает.
-        return None;
-    }
-    let t = (GROUND_HALF_HEIGHT - ray_origin.y) / ray_dir.y;
-    if t <= 0.0 {
-        return None;
-    }
-    Some(Vector::new(
-        ray_origin.x + ray_dir.x * t,
-        GROUND_HALF_HEIGHT,
-        ray_origin.z + ray_dir.z * t,
-    ))
+// Первое пересечение луча из камеры с любым фиксированным коллайдером (полом).
+fn ground_hit(
+    world: &PhysicsWorld,
+    ray_origin: glamx::Vec3,
+    ray_dir: glamx::Vec3,
+) -> Option<Vector> {
+    let ray = Ray::new(ray_origin, ray_dir);
+    // Ищем только в неподвижном теле-поле и игнорируем сенсорные метки целей.
+    let filter = QueryFilter::only_fixed().exclude_sensors();
+    let (_, intersection) = world.cast_ray_and_get_normal(&ray, Real::MAX, true, filter)?;
+    Some(ray_origin + ray_dir * intersection.time_of_impact)
 }
 
 // Индекс цели, ближайшей к заданной точке (в плоскости XZ).
@@ -247,9 +245,15 @@ fn move_target(simulation: &mut Simulation, index: usize, position: Vector) {
     let mut target = simulation.targets[index];
     target.x = position.x;
     target.z = position.z;
+    // Цель должна лежать на высоте рельефа в этом месте.
+    target.y = simulation.terrain.height_at(position.x, position.z) + BALL_RADIUS;
     simulation.targets[index] = target;
 
-    let marker_position = Vector::new(position.x, GROUND_HALF_HEIGHT + 0.02, position.z);
+    let marker_position = Vector::new(
+        position.x,
+        simulation.terrain.height_at(position.x, position.z) + 0.02,
+        position.z,
+    );
     simulation.world.bodies[simulation.target_body_handles[index]]
         .set_translation(marker_position, false);
 }
@@ -259,31 +263,49 @@ fn create_simulation(agents: &[agent::Agent]) -> Simulation {
     // PhysicsWorld уже содержит гравитацию, pipeline, тела, коллайдеры и решатели Rapier.
     let mut world = PhysicsWorld::new();
 
-    // Создаём неподвижную землю размером 40 × 0.2 × 40 единиц.
+    // Рельеф 80×80: загружаем из terrain.stl, а если файла ещё нет — генерируем и пишем.
+    let terrain = match terrain::Terrain::load_stl(Path::new("terrain.stl")) {
+        Ok(t) => t,
+        Err(err) => {
+            eprintln!("загрузка terrain.stl не удалась ({err}); генерирую заново");
+            let t = terrain::Terrain::generate();
+            t.write_stl(Path::new("terrain_2.stl"))
+                .expect("не удалось записать terrain.stl");
+            t
+        }
+    };
+
+    // Пол — STL-меш, прикреплённый к неподвижному телу.
     let (ground_handle, _) = world.insert(
         // Фиксированное тело не двигается под действием сил и гравитации.
         RigidBodyBuilder::fixed(),
-        // Аргументы cuboid являются полуразмерами геометрической формы.
-        ColliderBuilder::cuboid(20.0, GROUND_HALF_HEIGHT, 20.0).friction(1.0),
+        // Коллайдер построен из вершин и треугольников STL-рельефа.
+        terrain.collider(),
     );
 
     // Стартовые позиции пяти шаров: тесный кластер, чтобы роевые силы были заметны.
     let starts = [
-        Vector::new(0.0, GROUND_HALF_HEIGHT + BALL_RADIUS, 0.0),
-        Vector::new(0.6, GROUND_HALF_HEIGHT + BALL_RADIUS, 0.0),
-        Vector::new(-0.6, GROUND_HALF_HEIGHT + BALL_RADIUS, 0.3),
-        Vector::new(0.3, GROUND_HALF_HEIGHT + BALL_RADIUS, -0.6),
-        Vector::new(-0.3, GROUND_HALF_HEIGHT + BALL_RADIUS, -0.4),
-        // Vector::new(-1.0, GROUND_HALF_HEIGHT + BALL_RADIUS, -1.4),
+        Vector::new(0.0, 0.0, 0.0),
+        Vector::new(0.6, 0.0, 0.0),
+        Vector::new(-0.6, 0.0, 0.3),
+        Vector::new(0.3, 0.0, -0.6),
+        Vector::new(-0.3, 0.0, -0.4),
+        // Vector::new(-1.0, 0.0, -1.4),
     ];
 
     // Создаём динамические шары и сохраняем их идентификаторы.
     let mut ball_handles = Vec::new();
     for (i, start) in starts.iter().enumerate() {
+        // Ставим шар на высоту рельефа в его точке старта.
+        let position = Vector::new(
+            start.x,
+            terrain.height_at(start.x, start.z) + BALL_RADIUS,
+            start.z,
+        );
         let (ball_handle, _) = world.insert(
             // Небольшое линейное и угловое затухание помогает PID успокоить колебания.
             RigidBodyBuilder::dynamic()
-                .translation(*start)
+                .translation(position)
                 .linear_damping(0.8)
                 .angular_damping(0.3),
             agents[i].model.collider(),
@@ -291,17 +313,21 @@ fn create_simulation(agents: &[agent::Agent]) -> Simulation {
         ball_handles.push(ball_handle);
     }
 
-    // Две целевые точки на той же высоте, что и шары.
+    // Две целевые точки на высоте рельефа в местах целей.
     let targets = [
-        Vector::new(8.0, GROUND_HALF_HEIGHT + BALL_RADIUS, -3.0),
-        Vector::new(-7.0, GROUND_HALF_HEIGHT + BALL_RADIUS, 3.0),
+        Vector::new(8.0, terrain.height_at(8.0, -3.0) + BALL_RADIUS, -3.0),
+        Vector::new(-7.0, terrain.height_at(-7.0, 3.0) + BALL_RADIUS, 3.0),
     ];
 
     // Размещаем плоские метки немного выше поверхности земли.
     let mut target_collider_handles = Vec::new();
     let mut target_body_handles = Vec::new();
     for target in &targets {
-        let target_marker_position = Vector::new(target.x, GROUND_HALF_HEIGHT + 0.02, target.z);
+        let target_marker_position = Vector::new(
+            target.x,
+            terrain.height_at(target.x, target.z) + 0.02,
+            target.z,
+        );
         // Создаём зелёный цилиндр-маркер, который не участвует в столкновениях.
         let (target_body_handle, target_collider_handle) = world.insert(
             // Метка неподвижна и только показывает положение целевой точки.
@@ -321,6 +347,7 @@ fn create_simulation(agents: &[agent::Agent]) -> Simulation {
         target_collider_handles,
         target_body_handles,
         targets: targets.to_vec(),
+        terrain,
     }
 }
 
@@ -375,8 +402,7 @@ fn apply_swarm_controller(
         } else {
             simulation.targets[1]
         };
-        let mut setpoint = target;
-        setpoint.y = 0.0;
+        let setpoint = target;
 
         let ball_handle = simulation.ball_handles[i];
         let ball = &mut simulation.world.bodies[ball_handle];
