@@ -264,12 +264,12 @@ fn create_simulation(agents: &[agent::Agent]) -> Simulation {
     let mut world = PhysicsWorld::new();
 
     // Рельеф 80×80: загружаем из terrain.stl, а если файла ещё нет — генерируем и пишем.
-    let terrain = match terrain::Terrain::load_stl(Path::new("terrain.stl")) {
+    let terrain = match terrain::Terrain::load_stl(Path::new("terrain_3.stl")) {
         Ok(t) => t,
         Err(err) => {
             eprintln!("загрузка terrain.stl не удалась ({err}); генерирую заново");
             let t = terrain::Terrain::generate();
-            t.write_stl(Path::new("terrain_2.stl"))
+            t.write_stl(Path::new("terrain_3.stl"))
                 .expect("не удалось записать terrain.stl");
             t
         }

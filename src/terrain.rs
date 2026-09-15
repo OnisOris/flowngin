@@ -138,11 +138,7 @@ impl Terrain {
                     "STL обрезан: не хватает байт на треугольник",
                 ));
             }
-            let n = Vector::new(
-                read_f32(off)?,
-                read_f32(off + 4)?,
-                read_f32(off + 8)?,
-            );
+            let n = Vector::new(read_f32(off)?, read_f32(off + 4)?, read_f32(off + 8)?);
             let a = Vector::new(
                 read_f32(off + 12)?,
                 read_f32(off + 16)?,
@@ -181,7 +177,13 @@ impl Terrain {
         let cell = |p: Vector| {
             let gi = ((p.x + HALF) / STEP + 0.5) as i32;
             let gj = ((p.z + HALF) / STEP + 0.5) as i32;
-            let k = |v: i32| if (0..n as i32).contains(&v) { Some(v as usize) } else { None };
+            let k = |v: i32| {
+                if (0..n as i32).contains(&v) {
+                    Some(v as usize)
+                } else {
+                    None
+                }
+            };
             (k(gi), k(gj))
         };
 
@@ -250,13 +252,9 @@ impl StlMesh {
             indices.push([base, base + 1, base + 2]);
             vertices.extend_from_slice(tri);
         }
-        ColliderBuilder::trimesh_with_flags(
-            vertices,
-            indices,
-            TriMeshFlags::FIX_INTERNAL_EDGES,
-        )
-        .expect("меш пола должен содержать хотя бы один треугольник")
-        .friction(1.0)
+        ColliderBuilder::trimesh_with_flags(vertices, indices, TriMeshFlags::FIX_INTERNAL_EDGES)
+            .expect("меш пола должен содержать хотя бы один треугольник")
+            .friction(1.0)
     }
 }
 

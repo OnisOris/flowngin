@@ -8,9 +8,7 @@ pub struct Environment {
 
 impl Default for Environment {
     fn default() -> Self {
-        Self {
-            states: Vec::new(),
-        }
+        Self { states: Vec::new() }
     }
 }
 
