@@ -127,13 +127,16 @@ impl BoidsController {
         center - own.position
     }
 
-    fn alignment(&self, _own: &State, neighbors: &[(usize, &State)]) -> Vector {
+    fn alignment(&self, own: &State, neighbors: &[(usize, &State)]) -> Vector {
         let mut avg_velocity = Vector::ZERO;
+
         for (_, neighbor) in neighbors {
             avg_velocity += neighbor.velocity;
         }
+
         avg_velocity /= neighbors.len() as Real;
-        avg_velocity
+
+        avg_velocity - own.velocity
     }
 
     pub fn reset(&mut self) {
