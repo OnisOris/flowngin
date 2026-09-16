@@ -150,7 +150,7 @@ pub async fn main() {
 fn register_agent_settings(viewer: &mut TestbedViewer) {
     let settings = viewer.example_settings_mut();
     settings.set_restart_on_change("perception_radius", false);
-    settings.get_or_set_f32("perception_radius", 6.0, 0.0..=15.0);
+    settings.get_or_set_f32("perception_radius", 1.0, 0.0..=15.0);
     settings.set_restart_on_change("separation_zone", false);
     settings.get_or_set_f32("separation_zone", 3.0, 0.0..=12.0);
     settings.set_restart_on_change("separation_weight", false);

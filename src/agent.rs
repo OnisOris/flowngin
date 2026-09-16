@@ -78,7 +78,7 @@ impl Agent {
             boid_controller: BoidsController::default(),
             model: AgentModel {
                 shape: AgentShape::Ball { radius: 0.2 },
-                mass: 0.2,
+                mass: 0.1,
                 friction: 0.0,
                 restitution: 0.1,
             },
@@ -109,7 +109,7 @@ impl Agent {
             .motion_controller
             .update(desired_position, &self.state, dt);
 
-        motion_force + flock_force * 0.0
+        motion_force + flock_force
     }
 
     pub fn reset(&mut self) {

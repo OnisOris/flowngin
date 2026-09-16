@@ -23,10 +23,10 @@ pub struct PidController {
 impl Default for PidController {
     fn default() -> Self {
         Self {
-            kp: Vector::new(20., 10., 0.),
-            ki: Vector::new(1.1, 1.1, 0.),
-            kd: Vector::ONE * 10.0,
-            integral: Vector::new(1., 1., 0.),
+            kp: Vector::new(20., 10., 1.),
+            ki: Vector::new(1.1, 1.1, 1.),
+            kd: Vector::ONE * 2.0,
+            integral: Vector::new(1., 1., 1.),
             prev_error: None,
             prev_measurement: None,
             prev_derivative: Vector::ZERO,
