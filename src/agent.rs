@@ -22,6 +22,7 @@ impl Default for State {
 }
 
 impl State {
+    pub const ZERO: Self::new(Vector::ZERO, Vector::ZERO);
     pub fn new(position: Vector, velocity: Vector) -> Self {
         Self { position, velocity }
     }
@@ -111,7 +112,6 @@ impl Agent {
 
         motion_force + flock_force
     }
-
     pub fn reset(&mut self) {
         self.motion_controller.reset();
         self.boid_controller.reset();
